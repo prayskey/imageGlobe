@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/src/output.css" />
+    <title>Sign In</title>
+  </head>
+  <body class="flex h-dvh items-center justify-center bg-[#f4f4f4]">
+    <main class="text-center">
+      <!-- Company Logo container -->
+      <div class="space-x-1 flex justify-center items-center">
+        <span class="text-2xl font-bold text-[#0A66C2]">Linked</span>
+        <!-- SVG for linkedIn logo -->
+         <img class="w-6" src="/images/linkedin-svgrepo-com.svg" alt="">
+      </div>
+      <div>
+        <h1 class="my-5 text-xl">Make the most of your professional life</h1>
+      </div>
+      <!-- Container for Authentication methods -->
+      <div class="max-w-100 rounded-xl bg-white px-5 py-10 text-sm">
+        <form action="/login" method="post">
+
+          <!-- Invalid login credidentials -->
+           <% if (userNotFound) { %>
+            <div class="bg-red-200 h-15 w-full text-center text-red-500 font-medium flex justify-center items-center mb-3"><%= error %></div>
+           <% } %>
+
+          <!-- Fieldset for signup with local strategy -->
+          <fieldset class="flex flex-col space-y-5 text-gray-500">
+            <label class="text-left" for="email" class=""
+              >E-mail
+              <input
+                class="mt-2 block h-7 w-full rounded border px-2 focus:border focus:outline-blue-500"
+                type="email"
+                name="username"
+                id="email"
+                required
+              />
+            </label>
+
+            <label class="text-left" for="password"
+              >Password (6 characters minimum)
+              <input
+                class="mt-2 block h-7 w-full rounded border px-2 focus:border focus:outline-blue-500"
+                type="password"
+                name="password"
+                id="password"
+                required
+              />
+            </label>
+
+            <button
+              class="m-auto h-10 w-80 cursor-pointer rounded-3xl bg-[#0A66C2] font-medium text-white"
+              type="submit"
+            >
+              Sign In
+            </button>
+          </fieldset>
+        </form>
+        <!-- Fieldset for O Auth Method -->
+        <fieldset class="mt-4 border-t border-t-gray-300 text-center">
+          <legend class="mb-4 px-3">or</legend>
+          <!-- Google sign in button -->
+          <a
+            class="m-auto mb-4 flex h-10 w-80 cursor-pointer items-center justify-center rounded-3xl border border-[#0A66C2] text-center font-medium text-[#0A66C2] space-x-2"
+            href="/auth/google"
+            role="button"
+          >
+          <!-- Google Auth Icon -->
+           <img class="w-5" src="/images/google-color-svgrepo-com.svg" alt="">
+            <span>Sign in with Google</span>
+          </a>
+
+          <!-- Register Alternative if user has no account -->
+          <p>Don't have an account? <a href="/" class="text-blue-600 font-medium">Sign Up</a></p>
+        </fieldset>
+      </div>
+    </main>
+  </body>
+</html>
