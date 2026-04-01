@@ -182,7 +182,7 @@ passport.use('local', new Strategy(async (username, password, cb) => {
 passport.use('google', new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: "http://localhost:3000/auth/google/homepage"
+    callbackURL: "https://localhost:3000/auth/google/homepage"
 }, async (accessToken, refreshToken, profile, cb) => {
     try {
         const result = await db.query("SELECT * FROM users WHERE email = $1", [profile.email]);
