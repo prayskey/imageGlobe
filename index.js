@@ -163,6 +163,7 @@ passport.use('local', new Strategy(async (username, password, cb) => {
         if (!result.rows[0].password) return cb(null, false);
         if (result.rows.length > 0) {
             const user = result.rows[0];
+            if (!user.password) return cb(null, false);
             const hashedPassword = user.password;
             bcrypt.compare(password, hashedPassword, (err, isMatch) => {
                 if (err) return cb(err);
