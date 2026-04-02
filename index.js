@@ -9,8 +9,7 @@ import GoogleStrategy from "passport-google-oauth2";
 import env from "dotenv";
 import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
-import { CloudinaryStorage } from "multer-storage-cloudinary";
-import cloudinary from "/cloudinary.js";
+import fs from "fs";
 
 // Initialize env config in project
 env.config();
@@ -51,15 +50,7 @@ cloudinary.config({
 });
 
 // Configure multer storage to use Cloudinary
-const storage = new CloudinaryStorage({
-    cloudinary,
-    params: {
-        folder: "uploads",
-        allowed_formats: ["jpg", "png", "jpeg"],
-    },
-});
-
-const upload = multer({ storage });
+const upload = multer({ dest: "uploads/" });
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
@@ -73,11 +64,23 @@ app.get('/', async (req, res) => {
     }
 });
 
-app.get('/homepage', (req, res) => {
+app.get('/homepage', async (req, res) => {
     if (!req.isAuthenticated()) {
-        res.redirect('/');
-    } else {
-        res.render('homepage.ejs');
+        return res.redirect('/');
+    }
+
+    try {
+        const result = await db.query(
+            "SELECT image_url FROM images ORDER BY created_at DESC"
+        );
+
+        const images = result.rows.map(row => row.image_url);
+
+        res.render('homepage.ejs', { images });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).send("Server Error");
     }
 });
 
@@ -100,6 +103,23 @@ app.get('/logout', (req, res, next) => {
         }
         res.redirect('/login');
     });
+});
+
+app.post('/upload', upload.single('image'), async (req, res) => {
+    try {
+        const result = await cloudinary.uploader.upload(req.file.path);
+
+        await db.query(
+            "INSERT INTO images (image_url) VALUES ($1)",
+            [result.secure_url]
+        );
+
+        res.redirect('/homepage');
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).send("Upload failed");
+    }
 });
 
 app.post('/register', async (req, res) => {

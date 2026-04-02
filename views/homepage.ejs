@@ -4,72 +4,90 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Home</title>
-    <link rel="stylesheet" href="/src/output.css">
+    <link rel="stylesheet" href="/src/output.css" />
   </head>
-  <body>
+
+  <body class="bg-gray-100">
+
     <!-- Navbar -->
-    <nav class="flex items-center justify-between bg-white px-6 py-4 shadow">
-      <h1 class="text-xl font-bold text-[#0A66C2]">MyApp</h1>
+    <nav class="flex items-center justify-between bg-white px-4 py-3 shadow md:px-6">
+      <h1 class="text-lg font-bold text-[#0A66C2] md:text-xl">MyApp</h1>
 
       <a
         href="/logout"
-        class="flex items-center justify-center rounded-full border border-[#0A66C2] px-4 py-2 font-medium text-[#0A66C2] transition hover:bg-[#0A66C2] hover:text-white"
+        class="rounded-full border border-[#0A66C2] px-3 py-1 text-sm font-medium text-[#0A66C2] transition hover:bg-[#0A66C2] hover:text-white md:px-4 md:py-2 md:text-base"
       >
         Sign out
       </a>
     </nav>
 
-    <!-- Main Content -->
-    <main class="mx-auto max-w-6xl px-4 py-8">
+    <!-- Main -->
+    <main class="mx-auto max-w-6xl px-4 py-6 md:py-10">
+
       <!-- Header -->
-      <section class="mb-8">
-        <h2 class="mb-2 text-3xl font-bold">Welcome 👋</h2>
-        <p class="text-gray-600">Upload and manage your images easily.</p>
+      <section class="mb-6 md:mb-10">
+        <h2 class="mb-1 text-2xl font-bold md:text-3xl">Welcome 👋</h2>
+        <p class="text-sm text-gray-600 md:text-base">
+          Upload and manage your images easily.
+        </p>
       </section>
 
       <!-- Upload Section -->
-      <section class="mb-10 rounded-xl bg-white p-6 shadow">
-        <h3 class="mb-4 text-lg font-semibold">Upload Image</h3>
+      <section class="mb-8 rounded-xl bg-white p-4 shadow md:p-6">
+        <h3 class="mb-4 text-base font-semibold md:text-lg">Upload Image</h3>
 
         <form
-          id="uploadForm"
-          class="flex flex-col items-center gap-4 md:flex-row"
+          action="/upload"
+          method="POST"
+          enctype="multipart/form-data"
+          class="flex flex-col gap-3 sm:flex-row sm:items-center"
         >
           <input
             type="file"
             name="image"
             accept="image/*"
-            class="w-full rounded border p-2 md:w-auto"
             required
+            class="w-full rounded border p-2 text-sm sm:w-auto"
           />
 
           <button
             type="submit"
-            class="rounded bg-[#0A66C2] px-6 py-2 text-white transition hover:bg-blue-700"
+            class="w-full rounded bg-[#0A66C2] px-4 py-2 text-sm text-white transition hover:bg-blue-700 sm:w-auto md:px-6 md:py-2"
           >
             Upload
           </button>
         </form>
       </section>
 
-      <!-- Image Gallery -->
+      <!-- Gallery -->
       <section>
-        <h3 class="mb-4 text-xl font-semibold">Gallery</h3>
+        <h3 class="mb-4 text-lg font-semibold md:text-xl">Gallery</h3>
 
-        <div
-          id="gallery"
-          class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4"
-        >
-          <!-- Images from Cloudinary will be inserted here -->
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
 
-          <!-- Example placeholder -->
-          <div
-            class="flex h-40 items-center justify-center rounded bg-gray-200 text-gray-500"
-          >
-            No images yet
-          </div>
+          <% if (images && images.length > 0) { %>
+
+            <% images.forEach(image => { %>
+              <div class="overflow-hidden rounded-lg bg-white shadow">
+                <img
+                  src="<%= image %>"
+                  alt="Uploaded image"
+                  class="h-32 w-full object-cover sm:h-40 md:h-44"
+                />
+              </div>
+            <% }) %>
+
+          <% } else { %>
+
+            <div class="col-span-full flex h-40 items-center justify-center rounded-lg bg-gray-200 text-gray-500">
+              No images yet
+            </div>
+
+          <% } %>
+
         </div>
       </section>
+
     </main>
   </body>
 </html>
