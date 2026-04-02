@@ -252,3 +252,7 @@ passport.serializeUser((user, cb) => {
 passport.deserializeUser((user, cb) => {
     cb(null, user);
 });
+
+app.listen(PORT, () => {
+    console.log(`Server is listening at PORT ${PORT}`);
+});
