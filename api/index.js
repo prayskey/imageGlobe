@@ -271,7 +271,7 @@ passport.use("local", new Strategy(async (username, password, cb) => {
 passport.use("google", new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: "https://image-globe1.vercel.app//auth/google/homepage",
+    callbackURL: "https://image-globe1.vercel.app/auth/google/homepage",
 }, async (accessToken, refreshToken, profile, cb) => {
     try {
         const db = getDb();
