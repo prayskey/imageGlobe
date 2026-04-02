@@ -15,6 +15,7 @@ import path from "path";
 env.config();
 
 const app = express();
+app.set("trust proxy", 1); // required for secure cookies behind Vercel's proxy
 const saltRounds = 10;
 const PgStore = connectPgSimple(session);
 
@@ -38,7 +39,8 @@ function getDb() {
 // ─── Session ──────────────────────────────────────────────────────────────────
 // In-memory sessions are wiped between Vercel invocations.
 // connect-pg-simple persists sessions in Postgres (Supabase) instead.
-// Set createTableIfMissing: true so the "session" table is auto-created.
+// secure: true  — Vercel is always HTTPS, hardcode this.
+// sameSite: lax — prevents browser dropping cookie after redirects.
 
 app.use(session({
     store: new PgStore({
@@ -51,9 +53,9 @@ app.use(session({
     saveUninitialized: false,          // don't write sessions for unauthenticated requests
     cookie: {
         maxAge: 1000 * 60 * 60 * 24,
+        secure: true,        // Vercel is always HTTPS
         httpOnly: true,
-        secure: true,
-        sameSite: "lax",
+        sameSite: "lax",     // fixes cookie being dropped after login redirect
     }
 }));
 
@@ -304,4 +306,5 @@ passport.deserializeUser(async (id, cb) => {
         cb(err);
     }
 });
+
 export default app;
