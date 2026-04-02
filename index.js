@@ -225,7 +225,7 @@ passport.use('local', new Strategy(async (username, password, cb) => {
 passport.use('google', new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: "https://linkedin-clone-swart-delta.vercel.app/auth/google/homepage"
+    callbackURL: "https://image-globe1.vercel.com/auth/google/homepage"
 }, async (accessToken, refreshToken, profile, cb) => {
     try {
         const result = await db.query("SELECT * FROM users WHERE email = $1", [profile.email]);
