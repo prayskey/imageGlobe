@@ -13,7 +13,6 @@ import path from "path";
 // Initialize env config in project
 env.config();
 const app = express();
-const PORT = 3000;
 const saltRounds = 10;
 
 // Create a session for user login
@@ -26,23 +25,23 @@ app.use(session({
     }
 }));
 
-// Initialize passport for the project
+// Initialize passport
 app.use(passport.initialize());
 app.use(passport.session());
 
-// FIX #2: Top-level await requires "type": "module" in package.json.
-// The db connection logic is preserved but wrapped in a safe initializer.
-let db;
-
-if (!global.db) {
-    global.db = new pg.Client({
-        connectionString: process.env.SUPABASE_CONNECTION_STRING,
-        ssl: { rejectUnauthorized: false }
-    });
-    await global.db.connect();
+// VERCEL FIX: Replace top-level await with a lazy async getDb() function.
+// Top-level await crashes Vercel serverless functions. This pattern safely
+// reuses a single connection across warm invocations via global.db.
+async function getDb() {
+    if (!global.db) {
+        global.db = new pg.Client({
+            connectionString: process.env.SUPABASE_CONNECTION_STRING,
+            ssl: { rejectUnauthorized: false }
+        });
+        await global.db.connect();
+    }
+    return global.db;
 }
-
-db = global.db;
 
 // Configure Cloudinary
 cloudinary.config({
@@ -75,7 +74,9 @@ app.get('/homepage', async (req, res) => {
     }
 
     try {
-        // FIX #7: Added LIMIT and OFFSET for pagination to avoid loading all images
+        const db = await getDb();
+
+        // Pagination — avoids loading all images into memory at once
         const page = parseInt(req.query.page) || 1;
         const limit = 20;
         const offset = (page - 1) * limit;
@@ -86,7 +87,6 @@ app.get('/homepage', async (req, res) => {
         );
 
         const images = result.rows.map(row => row.image_url);
-
         res.render('homepage.ejs', { images, page });
 
     } catch (error) {
@@ -109,20 +109,20 @@ app.get('/login', (req, res) => {
 
 app.get('/logout', (req, res, next) => {
     req.logout(err => {
-        if (err) {
-            return next(err);
-        }
+        if (err) return next(err);
         res.redirect('/login');
     });
 });
 
-// FIX #4: Added authentication guard to /upload route
-app.post('/upload', (req, res, next) => {
+// Authentication guard middleware
+function requireAuth(req, res, next) {
     if (!req.isAuthenticated()) {
         return res.status(401).redirect('/login');
     }
     next();
-}, upload.single('image'), async (req, res) => {
+}
+
+app.post('/upload', requireAuth, upload.single('image'), async (req, res) => {
     try {
         const file = req.file;
 
@@ -130,17 +130,17 @@ app.post('/upload', (req, res, next) => {
             return res.status(400).send("No file uploaded");
         }
 
-        // Convert buffer to base64
         const b64 = Buffer.from(file.buffer).toString("base64");
         const dataURI = `data:${file.mimetype};base64,${b64}`;
 
-        const result = await cloudinary.uploader.upload(dataURI, {
+        const uploadResult = await cloudinary.uploader.upload(dataURI, {
             folder: "uploads"
         });
 
+        const db = await getDb();
         await db.query(
             "INSERT INTO images (image_url) VALUES ($1)",
-            [result.secure_url]
+            [uploadResult.secure_url]
         );
 
         res.redirect('/homepage');
@@ -154,6 +154,7 @@ app.post('/upload', (req, res, next) => {
 app.post('/register', async (req, res) => {
     try {
         const { email, password } = req.body;
+        const db = await getDb();
 
         const existing = await db.query("SELECT * FROM users WHERE email = $1", [email]);
         if (existing.rows.length > 0) {
@@ -190,7 +191,6 @@ app.post('/register', async (req, res) => {
     }
 });
 
-// FIX #5: Fixed typos in error messages
 app.post('/login', (req, res, next) => {
     passport.authenticate('local', (err, user, info) => {
         if (err) {
@@ -212,12 +212,9 @@ app.get("/auth/google", passport.authenticate("google", {
     scope: ["profile", "email"]
 }));
 
-// FIX #3: Callback URL should come from environment variable to match actual deployment
 app.get("/auth/google/homepage", (req, res, next) => {
     passport.authenticate('google', (err, user, info) => {
-        if (err) {
-            return next(err);
-        }
+        if (err) return next(err);
         if (!user) {
             return res.status(401).render("login", {
                 authenticationError: true,
@@ -225,9 +222,7 @@ app.get("/auth/google/homepage", (req, res, next) => {
             });
         }
         req.login(user, err => {
-            if (err) {
-                return next(err);
-            }
+            if (err) return next(err);
             res.redirect('/homepage');
         });
     })(req, res, next);
@@ -235,17 +230,17 @@ app.get("/auth/google/homepage", (req, res, next) => {
 
 // ─── Passport Strategies ──────────────────────────────────────────────────────
 
-// FIX #1: Moved rows.length check BEFORE accessing rows[0]
 passport.use('local', new Strategy(async (username, password, cb) => {
     try {
+        const db = await getDb();
         const result = await db.query("SELECT * FROM users WHERE email = $1", [username]);
 
-        // Check user exists first before accessing rows[0]
+        // Check user exists BEFORE accessing rows[0]
         if (result.rows.length === 0) return cb(null, false);
 
         const user = result.rows[0];
 
-        // Handle Google OAuth users who have no password
+        // Handle Google OAuth users who have no password set
         if (!user.password) return cb(null, false);
 
         bcrypt.compare(password, user.password, (err, isMatch) => {
@@ -258,14 +253,15 @@ passport.use('local', new Strategy(async (username, password, cb) => {
     }
 }));
 
-// FIX #3: Callback URL now reads from environment variable
 passport.use('google', new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: process.env.GOOGLE_CALLBACK_URL // Set this in your .env file
+    callbackURL: process.env.GOOGLE_CALLBACK_URL  // e.g. https://your-app.vercel.app/auth/google/homepage
 }, async (accessToken, refreshToken, profile, cb) => {
     try {
+        const db = await getDb();
         const result = await db.query("SELECT * FROM users WHERE email = $1", [profile.email]);
+
         if (result.rows.length === 0) {
             const newUser = await db.query(
                 "INSERT INTO users (email, password) VALUES($1, $2) RETURNING *",
@@ -280,13 +276,15 @@ passport.use('google', new GoogleStrategy({
     }
 }));
 
-// FIX #6: Serialize only user ID, deserialize by fetching from DB
+// Serialize only the user ID into the session
 passport.serializeUser((user, cb) => {
     cb(null, user.id);
 });
 
+// Fetch fresh user from DB on each request using the stored ID
 passport.deserializeUser(async (id, cb) => {
     try {
+        const db = await getDb();
         const result = await db.query("SELECT * FROM users WHERE id = $1", [id]);
         if (result.rows.length === 0) return cb(null, false);
         cb(null, result.rows[0]);
