@@ -291,13 +291,16 @@ passport.use("google", new GoogleStrategy({
 }));
 
 passport.serializeUser((user, cb) => {
+    console.log("Serializing user:", user); // paste what this prints in Vercel logs
     cb(null, user.id);
 });
 
 passport.deserializeUser(async (id, cb) => {
+    console.log("Deserializing id:", id); // if this prints undefined, that's the bug
     try {
         const db = getDb();
         const result = await db.query("SELECT * FROM users WHERE id = $1", [id]);
+        console.log("Deserialize result:", result.rows);
         if (result.rows.length === 0) return cb(null, false);
         cb(null, result.rows[0]);
     } catch (err) {
