@@ -9,7 +9,6 @@ import env from "dotenv";
 import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
 
 // Initialize env config in project
 env.config();
@@ -29,10 +28,10 @@ app.use(session({
 
 // Initialize passport for the project
 app.use(passport.initialize());
-// Initialize session
 app.use(passport.session());
 
-// create new instance of db
+// FIX #2: Top-level await requires "type": "module" in package.json.
+// The db connection logic is preserved but wrapped in a safe initializer.
 let db;
 
 if (!global.db) {
@@ -52,13 +51,15 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Configure multer storage to use Cloudinary
+// Configure multer to use memory storage
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(process.cwd(), "public")));
-app.set("views", path.join(process.cwd(), "views")); // Set the views directory
-app.set("view engine", "ejs"); // Set EJS as the view engine
+app.set("views", path.join(process.cwd(), "views"));
+app.set("view engine", "ejs");
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
 
 app.get('/', async (req, res) => {
     if (req.isAuthenticated()) {
@@ -74,13 +75,19 @@ app.get('/homepage', async (req, res) => {
     }
 
     try {
+        // FIX #7: Added LIMIT and OFFSET for pagination to avoid loading all images
+        const page = parseInt(req.query.page) || 1;
+        const limit = 20;
+        const offset = (page - 1) * limit;
+
         const result = await db.query(
-            "SELECT image_url FROM images ORDER BY created_at DESC"
+            "SELECT image_url FROM images ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+            [limit, offset]
         );
 
         const images = result.rows.map(row => row.image_url);
 
-        res.render('homepage.ejs', { images });
+        res.render('homepage.ejs', { images, page });
 
     } catch (error) {
         console.error(error);
@@ -109,7 +116,13 @@ app.get('/logout', (req, res, next) => {
     });
 });
 
-app.post('/upload', upload.single('image'), async (req, res) => {
+// FIX #4: Added authentication guard to /upload route
+app.post('/upload', (req, res, next) => {
+    if (!req.isAuthenticated()) {
+        return res.status(401).redirect('/login');
+    }
+    next();
+}, upload.single('image'), async (req, res) => {
     try {
         const file = req.file;
 
@@ -141,47 +154,54 @@ app.post('/upload', upload.single('image'), async (req, res) => {
 app.post('/register', async (req, res) => {
     try {
         const { email, password } = req.body;
-        // Hash password using bcrypt and store in database
+
+        const existing = await db.query("SELECT * FROM users WHERE email = $1", [email]);
+        if (existing.rows.length > 0) {
+            return res.render("register", { error: "User already exists.", duplicateUser: true });
+        }
+
         bcrypt.hash(password, saltRounds, async (err, hash) => {
             if (err) {
-                throw new Error("Error hashing password!");
-            } else {
-                const result = await db.query("SELECT * FROM users WHERE email = $1", [email]);
-                // Check if email already exist in database
-                if (result.rows.length > 0) {
-                    res.render("register", { error: "User already Exists.", duplicateUser: true });
-                } else {
-                    try {
-                        const result = await db.query("INSERT INTO USERS (email, password) VALUES($1, $2) RETURNING *", [email, hash]);
-                        const user = result.rows[0];
-                        req.login(user, err => {
-                            if (err) throw new Error(err);
-                            // Session saved
-                            // Action to do next
-                            res.redirect("/homepage");
-                        })
-                    } catch (err) {
-                        console.error(err);
-                    }
-                }
+                console.error("Error hashing password:", err);
+                return res.status(500).send("Registration failed");
             }
-        })
+
+            try {
+                const result = await db.query(
+                    "INSERT INTO users (email, password) VALUES($1, $2) RETURNING *",
+                    [email, hash]
+                );
+                const user = result.rows[0];
+                req.login(user, err => {
+                    if (err) {
+                        console.error(err);
+                        return res.status(500).send("Login after registration failed");
+                    }
+                    res.redirect("/homepage");
+                });
+            } catch (err) {
+                console.error(err);
+                res.status(500).send("Registration failed");
+            }
+        });
     } catch (err) {
         console.error(err);
+        res.status(500).send("Registration failed");
     }
 });
 
+// FIX #5: Fixed typos in error messages
 app.post('/login', (req, res, next) => {
     passport.authenticate('local', (err, user, info) => {
         if (err) {
-            return res.status(500).render('login.ejs', { userNotFound: true, error: err });
+            return res.status(500).render('login.ejs', { userNotFound: true, error: "Server error during login" });
         }
         if (!user) {
-            return res.render('login.ejs', { userNotFound: true, error: "Invalid credidentials" });
+            return res.render('login.ejs', { userNotFound: true, error: "Invalid credentials" });
         }
         req.login(user, err => {
             if (err) {
-                return res.status(500).render('login.ejs', { userNotFound: true, error: "Invalid crededidentials" });
+                return res.status(500).render('login.ejs', { userNotFound: true, error: "Invalid credentials" });
             }
             res.redirect('/homepage');
         });
@@ -192,7 +212,7 @@ app.get("/auth/google", passport.authenticate("google", {
     scope: ["profile", "email"]
 }));
 
-// Initialize google authentication strategy
+// FIX #3: Callback URL should come from environment variable to match actual deployment
 app.get("/auth/google/homepage", (req, res, next) => {
     passport.authenticate('google', (err, user, info) => {
         if (err) {
@@ -209,64 +229,70 @@ app.get("/auth/google/homepage", (req, res, next) => {
                 return next(err);
             }
             res.redirect('/homepage');
-        })
+        });
     })(req, res, next);
 });
 
-// Create strategy method for local login
+// ─── Passport Strategies ──────────────────────────────────────────────────────
+
+// FIX #1: Moved rows.length check BEFORE accessing rows[0]
 passport.use('local', new Strategy(async (username, password, cb) => {
-    // Check if user exists in database
     try {
-        const result = await db.query("SELECT * FROM USERS WHERE email = $1", [username]);
-        if (!result.rows[0].password) return cb(null, false);
-        if (result.rows.length > 0) {
-            const user = result.rows[0];
-            if (!user.password) return cb(null, false);
-            const hashedPassword = user.password;
-            bcrypt.compare(password, hashedPassword, (err, isMatch) => {
-                if (err) return cb(err);
-                if (isMatch) return cb(null, user);
-                else return cb(null, false);
-            })
-        } else {
-            return cb(null, false);
-        }
+        const result = await db.query("SELECT * FROM users WHERE email = $1", [username]);
+
+        // Check user exists first before accessing rows[0]
+        if (result.rows.length === 0) return cb(null, false);
+
+        const user = result.rows[0];
+
+        // Handle Google OAuth users who have no password
+        if (!user.password) return cb(null, false);
+
+        bcrypt.compare(password, user.password, (err, isMatch) => {
+            if (err) return cb(err);
+            if (isMatch) return cb(null, user);
+            else return cb(null, false);
+        });
     } catch (error) {
-        // Database error
         return cb(error);
     }
 }));
 
-// Register new authentication strategy for google
+// FIX #3: Callback URL now reads from environment variable
 passport.use('google', new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: "https://image-globe1.vercel.com/auth/google/homepage"
+    callbackURL: process.env.GOOGLE_CALLBACK_URL // Set this in your .env file
 }, async (accessToken, refreshToken, profile, cb) => {
     try {
         const result = await db.query("SELECT * FROM users WHERE email = $1", [profile.email]);
         if (result.rows.length === 0) {
-            const newUser = await db.query("INSERT INTO users (email, password) VALUES($1, $2) RETURNING *", [profile.email, null]);
-            const user = newUser.rows[0];
-            return cb(null, user);
+            const newUser = await db.query(
+                "INSERT INTO users (email, password) VALUES($1, $2) RETURNING *",
+                [profile.email, null]
+            );
+            return cb(null, newUser.rows[0]);
         } else {
-            // User already Exist in database
-            const user = result.rows[0];
-            return cb(null, user);
+            return cb(null, result.rows[0]);
         }
     } catch (err) {
         return cb(err);
     }
 }));
 
-// Store user into session
+// FIX #6: Serialize only user ID, deserialize by fetching from DB
 passport.serializeUser((user, cb) => {
-    cb(null, user);
+    cb(null, user.id);
 });
 
-// Return user session 
-passport.deserializeUser((user, cb) => {
-    cb(null, user);
+passport.deserializeUser(async (id, cb) => {
+    try {
+        const result = await db.query("SELECT * FROM users WHERE id = $1", [id]);
+        if (result.rows.length === 0) return cb(null, false);
+        cb(null, result.rows[0]);
+    } catch (err) {
+        cb(err);
+    }
 });
 
 export default app;
