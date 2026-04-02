@@ -253,6 +253,9 @@
   .grid {
     display: grid;
   }
+  .table {
+    display: table;
+  }
   .h-7 {
     height: calc(var(--spacing) * 7);
   }

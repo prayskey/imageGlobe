@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import pg from "pg";
 import passport from "passport";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import { Strategy } from "passport-local";
 import GoogleStrategy from "passport-google-oauth2";
 import env from "dotenv";
@@ -10,73 +11,96 @@ import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
 import path from "path";
 
-// Initialize env config in project
+// Initialize env config
 env.config();
+
 const app = express();
 const saltRounds = 10;
+const PgStore = connectPgSimple(session);
 
-// Create a session for user login
+// ─── Database ─────────────────────────────────────────────────────────────────
+// pg.Pool handles reconnection automatically — safe for serverless warm starts.
+// pg.Client can go stale between invocations; Pool avoids that entirely.
+
+function getDb() {
+    if (!global.dbPool) {
+        global.dbPool = new pg.Pool({
+            connectionString: process.env.SUPABASE_CONNECTION_STRING,
+            ssl: { rejectUnauthorized: false },
+            max: 3,                    // keep pool small for serverless
+            idleTimeoutMillis: 10000,
+            connectionTimeoutMillis: 5000,
+        });
+    }
+    return global.dbPool; // synchronous — no await needed
+}
+
+// ─── Session ──────────────────────────────────────────────────────────────────
+// In-memory sessions are wiped between Vercel invocations.
+// connect-pg-simple persists sessions in Postgres (Supabase) instead.
+// Set createTableIfMissing: true so the "session" table is auto-created.
+
 app.use(session({
+    store: new PgStore({
+        pool: getDb(),
+        tableName: "session",
+        createTableIfMissing: true,
+    }),
     secret: process.env.SESSION_SECRET,
     resave: false,
-    saveUninitialized: true,
+    saveUninitialized: false,          // don't write sessions for unauthenticated requests
     cookie: {
-        maxAge: 1000 * 60 * 60 * 24
+        maxAge: 1000 * 60 * 60 * 24,
+        secure: process.env.NODE_ENV === "production", // HTTPS-only in prod
+        httpOnly: true,
     }
 }));
 
-// Initialize passport
+// ─── Passport ─────────────────────────────────────────────────────────────────
+
 app.use(passport.initialize());
 app.use(passport.session());
 
-// VERCEL FIX: Replace top-level await with a lazy async getDb() function.
-// Top-level await crashes Vercel serverless functions. This pattern safely
-// reuses a single connection across warm invocations via global.db.
-async function getDb() {
-    if (!global.db) {
-        global.db = new pg.Client({
-            connectionString: process.env.SUPABASE_CONNECTION_STRING,
-            ssl: { rejectUnauthorized: false }
-        });
-        await global.db.connect();
-    }
-    return global.db;
-}
+// ─── Cloudinary ───────────────────────────────────────────────────────────────
 
-// Configure Cloudinary
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
+    api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Configure multer to use memory storage
+// ─── Multer ───────────────────────────────────────────────────────────────────
+
 const upload = multer({ storage: multer.memoryStorage() });
+
+// ─── Middleware ───────────────────────────────────────────────────────────────
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(process.cwd(), "public")));
 app.set("views", path.join(process.cwd(), "views"));
 app.set("view engine", "ejs");
 
-// ─── Routes ──────────────────────────────────────────────────────────────────
+// ─── Auth Guard ───────────────────────────────────────────────────────────────
 
-app.get('/', async (req, res) => {
-    if (req.isAuthenticated()) {
-        res.redirect("/homepage");
-    } else {
-        res.render('register.ejs', { duplicateUser: false });
+function requireAuth(req, res, next) {
+    if (!req.isAuthenticated()) {
+        return res.status(401).redirect("/login");
     }
+    next();
+}
+
+// ─── Routes ───────────────────────────────────────────────────────────────────
+
+app.get("/", (req, res) => {
+    if (req.isAuthenticated()) {
+        return res.redirect("/homepage");
+    }
+    res.render("register.ejs", { duplicateUser: false });
 });
 
-app.get('/homepage', async (req, res) => {
-    if (!req.isAuthenticated()) {
-        return res.redirect('/');
-    }
-
+app.get("/homepage", requireAuth, async (req, res) => {
     try {
-        const db = await getDb();
-
-        // Pagination — avoids loading all images into memory at once
+        const db = getDb();
         const page = parseInt(req.query.page) || 1;
         const limit = 20;
         const offset = (page - 1) * limit;
@@ -87,74 +111,63 @@ app.get('/homepage', async (req, res) => {
         );
 
         const images = result.rows.map(row => row.image_url);
-        res.render('homepage.ejs', { images, page });
+        res.render("homepage.ejs", { images, page });
 
     } catch (error) {
-        console.error(error);
+        console.error("Homepage error:", error);
         res.status(500).send("Server Error");
     }
 });
 
-app.get('/register', (req, res) => {
-    res.redirect('/');
+app.get("/register", (req, res) => {
+    res.redirect("/");
 });
 
-app.get('/login', (req, res) => {
+app.get("/login", (req, res) => {
     if (req.isAuthenticated()) {
-        res.redirect('/homepage');
-    } else {
-        res.render('login.ejs', { userNotFound: false });
+        return res.redirect("/homepage");
     }
+    res.render("login.ejs", { userNotFound: false });
 });
 
-app.get('/logout', (req, res, next) => {
+app.get("/logout", (req, res, next) => {
     req.logout(err => {
         if (err) return next(err);
-        res.redirect('/login');
+        res.redirect("/login");
     });
 });
 
-// Authentication guard middleware
-function requireAuth(req, res, next) {
-    if (!req.isAuthenticated()) {
-        return res.status(401).redirect('/login');
-    }
-    next();
-}
-
-app.post('/upload', requireAuth, upload.single('image'), async (req, res) => {
+app.post("/upload", requireAuth, upload.single("image"), async (req, res) => {
     try {
-        const file = req.file;
-
-        if (!file) {
+        if (!req.file) {
             return res.status(400).send("No file uploaded");
         }
 
-        const b64 = Buffer.from(file.buffer).toString("base64");
-        const dataURI = `data:${file.mimetype};base64,${b64}`;
+        const b64 = Buffer.from(req.file.buffer).toString("base64");
+        const dataURI = `data:${req.file.mimetype};base64,${b64}`;
 
         const uploadResult = await cloudinary.uploader.upload(dataURI, {
-            folder: "uploads"
+            folder: "uploads",
         });
 
-        const db = await getDb();
+        const db = getDb();
         await db.query(
             "INSERT INTO images (image_url) VALUES ($1)",
             [uploadResult.secure_url]
         );
 
-        res.redirect('/homepage');
+        res.redirect("/homepage");
 
     } catch (error) {
-        console.error(error);
+        console.error("Upload error:", error);
         res.status(500).send("Upload failed");
     }
 });
 
-app.post('/register', async (req, res) => {
+app.post("/register", async (req, res) => {
     try {
         const { email, password } = req.body;
-        const db = await getDb();
+        const db = getDb();
 
         const existing = await db.query("SELECT * FROM users WHERE email = $1", [email]);
         if (existing.rows.length > 0) {
@@ -172,94 +185,93 @@ app.post('/register', async (req, res) => {
                     "INSERT INTO users (email, password) VALUES($1, $2) RETURNING *",
                     [email, hash]
                 );
-                const user = result.rows[0];
-                req.login(user, err => {
+                req.login(result.rows[0], err => {
                     if (err) {
-                        console.error(err);
+                        console.error("Login after register error:", err);
                         return res.status(500).send("Login after registration failed");
                     }
                     res.redirect("/homepage");
                 });
             } catch (err) {
-                console.error(err);
+                console.error("Register insert error:", err);
                 res.status(500).send("Registration failed");
             }
         });
+
     } catch (err) {
-        console.error(err);
+        console.error("Register error:", err);
         res.status(500).send("Registration failed");
     }
 });
 
-app.post('/login', (req, res, next) => {
-    passport.authenticate('local', (err, user, info) => {
+app.post("/login", (req, res, next) => {
+    passport.authenticate("local", (err, user) => {
         if (err) {
-            return res.status(500).render('login.ejs', { userNotFound: true, error: "Server error during login" });
+            return res.status(500).render("login.ejs", { userNotFound: true, error: "Server error during login" });
         }
         if (!user) {
-            return res.render('login.ejs', { userNotFound: true, error: "Invalid credentials" });
+            return res.render("login.ejs", { userNotFound: true, error: "Invalid credentials" });
         }
         req.login(user, err => {
             if (err) {
-                return res.status(500).render('login.ejs', { userNotFound: true, error: "Invalid credentials" });
+                return res.status(500).render("login.ejs", { userNotFound: true, error: "Login failed" });
             }
-            res.redirect('/homepage');
+            res.redirect("/homepage");
         });
     })(req, res, next);
 });
 
 app.get("/auth/google", passport.authenticate("google", {
-    scope: ["profile", "email"]
+    scope: ["profile", "email"],
 }));
 
 app.get("/auth/google/homepage", (req, res, next) => {
-    passport.authenticate('google', (err, user, info) => {
+    passport.authenticate("google", (err, user) => {
         if (err) return next(err);
         if (!user) {
             return res.status(401).render("login", {
                 authenticationError: true,
-                err: "Authentication failed"
+                err: "Authentication failed",
             });
         }
         req.login(user, err => {
             if (err) return next(err);
-            res.redirect('/homepage');
+            res.redirect("/homepage");
         });
     })(req, res, next);
 });
 
 // ─── Passport Strategies ──────────────────────────────────────────────────────
 
-passport.use('local', new Strategy(async (username, password, cb) => {
+passport.use("local", new Strategy(async (username, password, cb) => {
     try {
-        const db = await getDb();
+        const db = getDb();
         const result = await db.query("SELECT * FROM users WHERE email = $1", [username]);
 
-        // Check user exists BEFORE accessing rows[0]
         if (result.rows.length === 0) return cb(null, false);
 
         const user = result.rows[0];
 
-        // Handle Google OAuth users who have no password set
+        // Google OAuth users have no password set
         if (!user.password) return cb(null, false);
 
         bcrypt.compare(password, user.password, (err, isMatch) => {
             if (err) return cb(err);
-            if (isMatch) return cb(null, user);
-            else return cb(null, false);
+            return cb(null, isMatch ? user : false);
         });
+
     } catch (error) {
         return cb(error);
     }
 }));
 
-passport.use('google', new GoogleStrategy({
+passport.use("google", new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: process.env.GOOGLE_CALLBACK_URL  // e.g. https://your-app.vercel.app/auth/google/homepage
+    callbackURL: process.env.GOOGLE_CALLBACK_URL,
 }, async (accessToken, refreshToken, profile, cb) => {
     try {
-        const db = await getDb();
+        const db = getDb();
         const result = await db.query("SELECT * FROM users WHERE email = $1", [profile.email]);
 
         if (result.rows.length === 0) {
@@ -268,23 +280,22 @@ passport.use('google', new GoogleStrategy({
                 [profile.email, null]
             );
             return cb(null, newUser.rows[0]);
-        } else {
-            return cb(null, result.rows[0]);
         }
+
+        return cb(null, result.rows[0]);
+
     } catch (err) {
         return cb(err);
     }
 }));
 
-// Serialize only the user ID into the session
 passport.serializeUser((user, cb) => {
     cb(null, user.id);
 });
 
-// Fetch fresh user from DB on each request using the stored ID
 passport.deserializeUser(async (id, cb) => {
     try {
-        const db = await getDb();
+        const db = getDb();
         const result = await db.query("SELECT * FROM users WHERE id = $1", [id]);
         if (result.rows.length === 0) return cb(null, false);
         cb(null, result.rows[0]);
