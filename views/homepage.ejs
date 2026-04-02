@@ -1,19 +1,75 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Home</title>
-</head>
-<body>
-    <h1>This is the Homepage of the website</h1>
-    <a
-            class="m-auto mb-4 flex h-10 w-50 cursor-pointer items-center justify-center rounded-3xl border border-[#0A66C2] text-center font-medium text-[#0A66C2] space-x-2"
-            href="/logout"
-            role="button"
+    <link rel="stylesheet" href="/src/output.css">
+  </head>
+  <body>
+    <!-- Navbar -->
+    <nav class="flex items-center justify-between bg-white px-6 py-4 shadow">
+      <h1 class="text-xl font-bold text-[#0A66C2]">MyApp</h1>
+
+      <a
+        href="/logout"
+        class="flex items-center justify-center rounded-full border border-[#0A66C2] px-4 py-2 font-medium text-[#0A66C2] transition hover:bg-[#0A66C2] hover:text-white"
+      >
+        Sign out
+      </a>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="mx-auto max-w-6xl px-4 py-8">
+      <!-- Header -->
+      <section class="mb-8">
+        <h2 class="mb-2 text-3xl font-bold">Welcome 👋</h2>
+        <p class="text-gray-600">Upload and manage your images easily.</p>
+      </section>
+
+      <!-- Upload Section -->
+      <section class="mb-10 rounded-xl bg-white p-6 shadow">
+        <h3 class="mb-4 text-lg font-semibold">Upload Image</h3>
+
+        <form
+          id="uploadForm"
+          class="flex flex-col items-center gap-4 md:flex-row"
+        >
+          <input
+            type="file"
+            name="image"
+            accept="image/*"
+            class="w-full rounded border p-2 md:w-auto"
+            required
+          />
+
+          <button
+            type="submit"
+            class="rounded bg-[#0A66C2] px-6 py-2 text-white transition hover:bg-blue-700"
           >
-          <!-- Sign out -->
-            <span>Sign out</span>
-          </a>
-</body>
+            Upload
+          </button>
+        </form>
+      </section>
+
+      <!-- Image Gallery -->
+      <section>
+        <h3 class="mb-4 text-xl font-semibold">Gallery</h3>
+
+        <div
+          id="gallery"
+          class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4"
+        >
+          <!-- Images from Cloudinary will be inserted here -->
+
+          <!-- Example placeholder -->
+          <div
+            class="flex h-40 items-center justify-center rounded bg-gray-200 text-gray-500"
+          >
+            No images yet
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
 </html>

@@ -7,6 +7,10 @@ import session from "express-session";
 import { Strategy } from "passport-local";
 import GoogleStrategy from "passport-google-oauth2";
 import env from "dotenv";
+import { v2 as cloudinary } from "cloudinary";
+import multer from "multer";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
+import cloudinary from "/cloudinary.js";
 
 // Initialize env config in project
 env.config();
@@ -38,6 +42,24 @@ const db = new pg.Client({
 });
 // connect project to database
 db.connect();
+
+// Configure Cloudinary
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// Configure multer storage to use Cloudinary
+const storage = new CloudinaryStorage({
+    cloudinary,
+    params: {
+        folder: "uploads",
+        allowed_formats: ["jpg", "png", "jpeg"],
+    },
+});
+
+const upload = multer({ storage });
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
@@ -123,7 +145,7 @@ app.post('/login', (req, res, next) => {
         }
         req.login(user, err => {
             if (err) {
-                return res.status(500).render('login.ejs', { userNotFound: true, error: err });
+                return res.status(500).render('login.ejs', { userNotFound: true, error: "Invalid crededidentials" });
             }
             res.redirect('/homepage');
         });
