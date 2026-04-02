@@ -1,5 +1,4 @@
 import express from "express";
-import bodyParser from "body-parser";
 import bcrypt from "bcrypt";
 import pg from "pg";
 import passport from "passport";
@@ -9,6 +8,7 @@ import GoogleStrategy from "passport-google-oauth2";
 import env from "dotenv";
 import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
+import path from "path";
 import fs from "fs";
 
 // Initialize env config in project
@@ -33,14 +33,17 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // create new instance of db
-const db = new pg.Client({
-    connectionString: process.env.SUPABASE_CONNECTION_STRING,
-    ssl: {
-        rejectUnauthorized: false // Required for Supabase in many environments
-    }
-});
-// connect project to database
-db.connect();
+let db;
+
+if (!global.db) {
+    global.db = new pg.Client({
+        connectionString: process.env.SUPABASE_CONNECTION_STRING,
+        ssl: { rejectUnauthorized: false }
+    });
+    await global.db.connect();
+}
+
+db = global.db;
 
 // Configure Cloudinary
 cloudinary.config({
@@ -50,11 +53,12 @@ cloudinary.config({
 });
 
 // Configure multer storage to use Cloudinary
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static("public"));
-app.set("view engine", "ejs");
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(process.cwd(), "public")));
+app.set("views", path.join(process.cwd(), "views")); // Set the views directory
+app.set("view engine", "ejs"); // Set EJS as the view engine
 
 app.get('/', async (req, res) => {
     if (req.isAuthenticated()) {
@@ -107,7 +111,19 @@ app.get('/logout', (req, res, next) => {
 
 app.post('/upload', upload.single('image'), async (req, res) => {
     try {
-        const result = await cloudinary.uploader.upload(req.file.path);
+        const file = req.file;
+
+        if (!file) {
+            return res.status(400).send("No file uploaded");
+        }
+
+        // Convert buffer to base64
+        const b64 = Buffer.from(file.buffer).toString("base64");
+        const dataURI = `data:${file.mimetype};base64,${b64}`;
+
+        const result = await cloudinary.uploader.upload(dataURI, {
+            folder: "uploads"
+        });
 
         await db.query(
             "INSERT INTO images (image_url) VALUES ($1)",
@@ -253,6 +269,4 @@ passport.deserializeUser((user, cb) => {
     cb(null, user);
 });
 
-app.listen(PORT, () => {
-    console.log(`Server is listening at PORT ${PORT}`);
-});
+export default app;
